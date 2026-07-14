@@ -1,0 +1,169 @@
+#!/bin/bash
+# ff-theme.sh — switch userChrome.css / userContent.css themes for Firefox
+#
+# Layout expected under $THEMES:
+#   $THEMES/
+#     dark-compact/          <- a theme: contains userChrome.css and/or userContent.css
+#     minimal-tabs/          <- another theme
+#     .current-dark-compact <- (empty, hidden) marks the currently active theme
+#
+# A plain file can't share a name with a folder, so the marker is the theme's
+# name prefixed with ".current-" and hidden — still obvious at a glance.
+#
+# Usage: ./ff-theme.sh
+
+set -euo pipefail
+
+UNAPPLY=0
+
+# ---- configure this -------------------------------------------------------
+THEMES="$HOME/.local/share/firefox-themes"
+# ----------------------------------------------------------------------------
+
+show_help() {
+    cat <<EOF
+ff-theme.sh — switch Firefox userChrome.css/userContent.css themes
+
+USAGE
+  ff-theme.sh          list themes and prompt for a selection
+  ff-theme.sh -h        show this help
+  ff-theme.sh -u        unapply themes, restore Firefox's default look
+
+WHERE THEMES LIVE
+  Themes are read from:
+    $THEMES
+  (edit the THEMES= line near the top of this script to change that path)
+
+NAMING RULES FOR $THEMES
+  - Each theme is its own subfolder, e.g.:
+        $THEMES/dark-compact/
+        $THEMES/minimal-tabs/
+  - A theme's folder name is what gets listed and selected — keep it short,
+    lowercase, no spaces (dashes are fine: "dark-compact", not "Dark Compact").
+  - Inside each theme folder, put whichever of these it defines:
+        userChrome.css
+        userContent.css
+    (any other files, e.g. an assets/ subfolder for images, get copied too)
+  - Do NOT create a plain file at the top level of $THEMES with the same
+    name as a theme folder — the script uses a hidden marker file named
+    .current-<themename> to remember which theme is active. It's created
+    and renamed automatically; you shouldn't need to touch it.
+
+WHAT IT DOES ON RUN
+  - Finds your Firefox profile automatically.
+  - Creates the profile's chrome/ folder and userChrome.css/userContent.css
+    if they don't exist yet.
+  - Lists your theme folders, marking the active one.
+  - Pressing Enter re-copies the current theme's files (no symlinks).
+  - Picking a number copies that theme's files into chrome/, overwriting
+    what was there, and updates the .current-<themename> marker.
+EOF
+}
+
+for arg in "$@"; do
+    case "$arg" in
+        -h|--help) show_help; exit 0 ;;
+        -u|--unapply) UNAPPLY=1 ;;
+    esac
+done
+
+# ---- colors ----------------------------------------------------------------
+BOLD=$(tput bold); DIM=$(tput dim); RESET=$(tput sgr0)
+CYAN=$(tput setaf 6); GREEN=$(tput setaf 2); YELLOW=$(tput setaf 3); RED=$(tput setaf 1)
+
+die() { echo "${RED}✗ $*${RESET}" >&2; exit 1; }
+
+# ---- find the Firefox profile ----------------------------------------------
+find_profile_dir() {
+    local base match
+    for base in "$HOME/.config/mozilla/firefox" "$HOME/.mozilla/firefox"; do
+        [ -d "$base" ] || continue
+        match=$(find "$base" -maxdepth 1 -type d -name "*.default-release" | head -n1)
+        [ -n "$match" ] && { echo "$match"; return 0; }
+    done
+    return 1
+}
+
+PROFILE_DIR=$(find_profile_dir) || die "Couldn't find a *.default-release profile folder."
+CHROME_DIR="$PROFILE_DIR/chrome"
+
+mkdir -p "$CHROME_DIR"
+touch "$CHROME_DIR/userChrome.css" "$CHROME_DIR/userContent.css"
+
+if [ "$UNAPPLY" -eq 1 ]; then
+    : > "$CHROME_DIR/userChrome.css"
+    : > "$CHROME_DIR/userContent.css"
+    rm -f "$THEMES"/.current-* 2>/dev/null || true
+    echo
+    echo "${GREEN}✓ Cleared userChrome.css / userContent.css — back to stock Firefox.${RESET}"
+    echo "${DIM}Restart Firefox to see the change.${RESET}"
+    exit 0
+fi
+
+[ -d "$THEMES" ] || die "Themes folder not found: $THEMES"
+
+# ---- gather themes + the current marker ------------------------------------
+mapfile -t THEME_LIST < <(find "$THEMES" -mindepth 1 -maxdepth 1 -type d -printf '%f\n' | sort)
+[ "${#THEME_LIST[@]}" -gt 0 ] || die "No theme folders found in $THEMES"
+
+CURRENT=""
+MARKER=""
+for f in "$THEMES"/.current-*; do
+    [ -e "$f" ] || continue
+    MARKER=$(basename "$f")
+    CURRENT="${MARKER#.current-}"
+    break
+done
+
+apply_theme() {
+    local name="$1"
+    local src="$THEMES/$name"
+    [ -d "$src" ] || die "Theme '$name' doesn't exist."
+    cp -f "$src"/*.css "$CHROME_DIR"/ 2>/dev/null || die "Theme '$name' has no .css files."
+    echo "${GREEN}✓ Applied '${BOLD}$name${RESET}${GREEN}' → $CHROME_DIR${RESET}"
+}
+
+# ---- pretty listing ---------------------------------------------------------
+echo
+echo "${BOLD}${CYAN}Firefox Theme Switcher${RESET}"
+echo "${DIM}profile: $PROFILE_DIR${RESET}"
+echo
+
+for i in "${!THEME_LIST[@]}"; do
+    n=$((i + 1))
+    name="${THEME_LIST[$i]}"
+    if [ "$name" = "$CURRENT" ]; then
+        printf "  %s%2d)%s %s%s ●  current%s\n" "$CYAN" "$n" "$RESET" "$BOLD$GREEN" "$name" "$RESET"
+    else
+        printf "  %s%2d)%s %s\n" "$CYAN" "$n" "$RESET" "$name"
+    fi
+done
+
+echo
+if [ -n "$CURRENT" ]; then
+    read -rp "${YELLOW}Select a theme number ${DIM}(Enter = re-apply '$CURRENT')${RESET}: " choice
+else
+    read -rp "${YELLOW}Select a theme number: ${RESET}" choice
+fi
+
+# ---- handle the choice -------------------------------------------------------
+if [ -z "$choice" ]; then
+    [ -n "$CURRENT" ] || die "No current theme set yet — pick a number first."
+    apply_theme "$CURRENT"
+    exit 0
+fi
+
+if ! [[ "$choice" =~ ^[0-9]+$ ]] || [ "$choice" -lt 1 ] || [ "$choice" -gt "${#THEME_LIST[@]}" ]; then
+    die "Invalid choice: $choice"
+fi
+
+CHOSEN="${THEME_LIST[$((choice - 1))]}"
+apply_theme "$CHOSEN"
+
+if [ -n "$CURRENT" ] && [ "$CURRENT" != "$CHOSEN" ]; then
+    mv "$THEMES/$MARKER" "$THEMES/.current-$CHOSEN"
+elif [ -z "$CURRENT" ]; then
+    touch "$THEMES/.current-$CHOSEN"
+fi
+
+echo "${DIM}Restart Firefox to see the change.${RESET}"
