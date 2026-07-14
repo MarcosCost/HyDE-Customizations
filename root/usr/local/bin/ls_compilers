@@ -1,0 +1,155 @@
+#!/usr/bin/env zsh
+
+if [[ -t 1 ]]; then
+    BOLD=$'\033[1m'; GREEN=$'\033[32m'; RED=$'\033[31m'; YELLOW=$'\033[33m'; DIM=$'\033[2m'; RESET=$'\033[0m'
+else
+    BOLD=""; GREEN=""; RED=""; YELLOW=""; DIM=""; RESET=""
+fi
+
+# Each entry: "Label|command|version-args"
+TOOLS=(
+    "C (gcc)|gcc|--version"
+    "C (clang)|clang|--version"
+    "C++ (g++)|g++|--version"
+    "C++ (clang++)|clang++|--version"
+    "Rust (rustc)|rustc|--version"
+    "Rust (cargo)|cargo|--version"
+    "Java (JDK)|javac|-version"
+    "Java (JRE)|java|-version"
+    "Python 3|python3|--version"
+    "Python 2|python2|--version"
+    "Node.js (JS)|node|--version"
+    "TypeScript (tsc)|tsc|--version"
+    "Deno (JS/TS)|deno|--version"
+    "Bun (JS/TS)|bun|--version"
+    "Go|go|version"
+    "Ruby|ruby|--version"
+    "PHP|php|--version"
+    "Swift|swift|--version"
+    "Kotlin|kotlinc|-version"
+    "C# (dotnet)|dotnet|--version"
+    "C# (mono)|mono|--version"
+    "Perl|perl|--version"
+    "Lua|lua|-v"
+    "Zig|zig|version"
+    "Haskell (GHC)|ghc|--version"
+    "Elixir|elixir|--version"
+    "Erlang|erl|-version"
+    "Scala|scala|-version"
+    "R|R|--version"
+    "Julia|julia|--version"
+)
+
+echo "${DIM}------------------------------------------------------------${RESET}"
+echo "${BOLD}Installed language toolchains (all PATH matches)${RESET}"
+echo "${DIM}------------------------------------------------------------${RESET}"
+
+found=0
+missing=0
+
+for entry in "${TOOLS[@]}"; do
+    IFS='|' read -r label cmd verflag <<< "$entry"
+
+    raw=$(whence -ap "$cmd" 2>/dev/null)
+
+    if [[ -z "$raw" ]]; then
+        matches=()
+    else
+        matches=("${(@f)raw}")
+    fi
+
+    if (( ${#matches[@]} > 0 )); then
+        found=$((found + 1))
+        plural=""
+        (( ${#matches[@]} > 1 )) && plural="s"
+        echo "${GREEN}[OK]${RESET} ${label} ${DIM}(${#matches[@]} installation${plural})${RESET}"
+
+        for bin_path in "${matches[@]}"; do
+            # Perl prints its version on the "This is perl" line, not always line 1
+            if [[ "$cmd" == "perl" ]]; then
+                ver=$("$bin_path" "$verflag" 2>&1 | grep -m1 -i "This is perl")
+            else
+                ver=$("$bin_path" "$verflag" 2>&1 | head -n1)
+            fi
+            echo "       ${DIM}${bin_path}${RESET}"
+            echo "       ${DIM}${ver}${RESET}"
+        done
+    else
+        missing=$((missing + 1))
+        echo "${RED}[--]${RESET} ${label} ${DIM}not found${RESET}"
+    fi
+done
+
+echo "${DIM}------------------------------------------------------------${RESET}"
+echo "${BOLD}${found} found, ${missing} missing${RESET}"
+echo
+
+# ------------------------------------------------------------------
+# Version managers — these often shim a single binary on PATH, so
+# the section above only sees the "active" version. Ask each manager
+# directly for its full list. Each check is independent: this only
+# fires if that manager's own binary/config is genuinely present.
+# ------------------------------------------------------------------
+
+echo "${BOLD}Version managers${RESET}"
+echo "${DIM}------------------------------------------------------------${RESET}"
+
+any_manager=false
+
+if command -v pyenv >/dev/null 2>&1; then
+    any_manager=true
+    echo "${YELLOW}pyenv${RESET} (Python) — versions:"
+    pyenv versions 2>/dev/null | sed 's/^/       /'
+    echo
+fi
+
+if command -v nvm >/dev/null 2>&1 || [[ -s "${NVM_DIR:-$HOME/.nvm}/nvm.sh" ]]; then
+    any_manager=true
+    echo "${YELLOW}nvm${RESET} (Node.js) — versions:"
+    if [[ -s "${NVM_DIR:-$HOME/.nvm}/nvm.sh" ]]; then
+        source "${NVM_DIR:-$HOME/.nvm}/nvm.sh" >/dev/null 2>&1
+    fi
+    nvm ls 2>/dev/null | sed 's/^/       /'
+    echo
+fi
+
+if command -v rustup >/dev/null 2>&1; then
+    any_manager=true
+    echo "${YELLOW}rustup${RESET} (Rust) — toolchains:"
+    rustup toolchain list 2>/dev/null | sed 's/^/       /'
+    echo
+fi
+
+if command -v sdk >/dev/null 2>&1 || [[ -s "$HOME/.sdkman/bin/sdkman-init.sh" ]]; then
+    any_manager=true
+    echo "${YELLOW}sdkman${RESET} (Java/Kotlin/Scala/Groovy) — installed candidates:"
+    if [[ -d "$HOME/.sdkman/candidates" ]]; then
+        for candidate in "$HOME/.sdkman/candidates"/*; do
+            [[ -d "$candidate" ]] || continue
+            name=$(basename "$candidate")
+            versions=$(ls "$candidate" 2>/dev/null | grep -v current)
+            [[ -n "$versions" ]] && echo "       ${name}: ${versions//$'\n'/, }"
+        done
+    fi
+    echo
+fi
+
+if command -v rbenv >/dev/null 2>&1; then
+    any_manager=true
+    echo "${YELLOW}rbenv${RESET} (Ruby) — versions:"
+    rbenv versions 2>/dev/null | sed 's/^/       /'
+    echo
+fi
+
+if command -v asdf >/dev/null 2>&1; then
+    any_manager=true
+    echo "${YELLOW}asdf${RESET} (multi-language) — installed plugins/versions:"
+    asdf list 2>/dev/null | sed 's/^/       /'
+    echo
+fi
+
+if ! $any_manager; then
+    echo "${DIM}(none detected: pyenv, nvm, rustup, sdkman, rbenv, asdf)${RESET}"
+fi
+
+echo "${DIM}------------------------------------------------------------${RESET}"
