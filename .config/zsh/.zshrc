@@ -58,3 +58,8 @@ fastfetch() {
         command fastfetch "$@" --logo-type none
     fi
 }
+
+# Normalize PATH: dedupe and remove empty entries
+typeset -U path
+path=("${(@)path:#}")
+export PATH
