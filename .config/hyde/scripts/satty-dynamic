@@ -1,0 +1,12 @@
+#!/usr/bin/env zsh
+#
+# Get logical resolution by dividing physical pixels by the display scale
+res=$(hyprctl monitors -j | jq -r '.[] | select(.focused==true) | "\((.width / .scale) | floor)x\((.height / .scale) | floor)"')
+
+w=$(echo "$res" | cut -dx -f1)
+h=$(echo "$res" | cut -dx -f2)
+
+w70=$(( w * 70 / 100 ))
+h70=$(( h * 70 / 100 ))
+
+exec satty --resize "${w70}x${h70}" "$@"
