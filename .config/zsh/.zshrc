@@ -59,6 +59,9 @@ fastfetch() {
     fi
 }
 
+# Custom Scripts Path
+export PATH="$HOME/.local/bin/custom_scripts:$PATH"
+
 # Normalize PATH: dedupe and remove empty entries
 typeset -U path
 path=("${(@)path:#}")
