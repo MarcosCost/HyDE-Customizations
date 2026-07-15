@@ -10,7 +10,10 @@ annotation_tool = "satty-dynamic"
 
 [battery.notify]
 dock = false
+notify = 999999
 
 [battery.notify.threshold]
 low = 20
 critical = 10
+full = 100
+unplug = 100
