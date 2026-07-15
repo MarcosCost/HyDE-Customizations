@@ -19,6 +19,10 @@ alias lt='eza --icons=auto --tree'                                     # list fo
 # # Always mkdir a path (this doesn't inhibit functionality to make a single dir)
 alias mkdir='mkdir -p'
 
+# # Lite-lx has weird startup behaviour this fixes it
+alias lite='(nohup lite-xl </dev/null &>/dev/null &)'
+
+
 #  This is your file 
 # Add your configurations here
 export EDITOR=nvim
