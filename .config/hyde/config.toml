@@ -6,3 +6,11 @@
 
 [screenshot]
 annotation_tool = "satty-dynamic"
+
+
+[battery.notify]
+dock = false
+
+[battery.notify.threshold]
+low = 20
+critical = 10
