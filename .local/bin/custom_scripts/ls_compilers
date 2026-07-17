@@ -1,12 +1,107 @@
 #!/usr/bin/env zsh
 
+# Define colors
+if [[ -t 1 ]]; then
+    BOLD=$'\033[1m'; GREEN=$'\033[32m'; CYAN=$'\033[36m'; YELLOW=$'\033[33m'; DIM=$'\033[2m'; RESET=$'\033[0m'
+else
+    BOLD=""; GREEN=""; CYAN=""; YELLOW=""; DIM=""; RESET=""
+fi
+
+# Parse -i flag for "Info only" mode
+if [[ "$1" == "-i" ]]; then
+    echo "${BOLD}${CYAN}=== DevCheck: Tracked Tooling ===${RESET}"
+    
+    echo "\n${BOLD}${GREEN}LANGUAGE TOOLCHAINS${RESET}"
+    echo "${YELLOW}C/C++${RESET}      : gcc, clang, g++, clang++"
+    echo "${YELLOW}Rust${RESET}       : rustc, cargo"
+    echo "${YELLOW}Java/JVM${RESET}    : javac, java"
+    echo "${YELLOW}Python${RESET}     : python3, python2"
+    echo "${YELLOW}JS/TS${RESET}      : node, tsc, deno, bun"
+    echo "${YELLOW}Others${RESET}     : go, ruby, php, swift, kotlinc, dotnet, mono, perl, lua, zig, ghc, elixir, erl, scala, R, julia"
+
+    echo "\n${BOLD}${GREEN}PACKAGE & BUILD MANAGERS${RESET}"
+    echo "${YELLOW}JS/TS${RESET}      : npm, pnpm, yarn, npx, bower"
+    echo "${YELLOW}Python${RESET}     : pip, pip3, uv, poetry, conda, pipenv, pdm, rye, flit, hatch"
+    echo "${YELLOW}JVM${RESET}        : mvn, gradle, ant, sbt, mill"
+    echo "${YELLOW}C/C++${RESET}      : cmake, make, ninja, conan, vcpkg, meson, automake"
+    echo "${YELLOW}Others${RESET}     : gem, bundle, composer, cpan, luarocks, go, cargo, pod, nuget, cabal, mix, julia-pkg, brew, nix, devbox"
+
+    echo "\n${BOLD}${GREEN}VERSION MANAGERS${RESET}"
+    echo "${YELLOW}Multi${RESET}      : mise, asdf, proto"
+    echo "${YELLOW}Languages${RESET}  : pyenv, conda, nvm, fnm, volta, rustup, sdkman, jenv, rbenv, rvm, chruby, gvm, goenv, phpenv, phpbrew, swiftenv, plenv, luaenv, ghcup, kiex, kerl, juliaup, rig, zvm"
+    
+    echo "\n${DIM}------------------------------------------------------------${RESET}"
+    exit 0
+fi
+
 if [[ -t 1 ]]; then
     BOLD=$'\033[1m'; GREEN=$'\033[32m'; RED=$'\033[31m'; YELLOW=$'\033[33m'; DIM=$'\033[2m'; RESET=$'\033[0m'
 else
     BOLD=""; GREEN=""; RED=""; YELLOW=""; DIM=""; RESET=""
 fi
 
-# Each entry: "Label|command|version-args"
+# Portable 3-second timeout to prevent tools from hanging on network checks or daemons
+run_with_timeout() {
+    if command -v timeout >/dev/null 2>&1; then
+        timeout 3s "$@"
+    elif command -v gtimeout >/dev/null 2>&1; then
+        gtimeout 3s "$@"
+    elif command -v perl >/dev/null 2>&1; then
+        perl -e 'alarm 3; exec @ARGV' -- "$@"
+    else
+        "$@"
+    fi
+}
+
+# Function to check and print an array of tools
+check_tool_array() {
+    local -a tools=("$@")
+    local found=0
+    local missing=0
+
+    for entry in "${tools[@]}"; do
+        IFS='|' read -r label cmd verflag <<< "$entry"
+
+        raw=$(whence -ap "$cmd" 2>/dev/null)
+
+        if [[ -z "$raw" ]]; then
+            matches=()
+        else
+            matches=("${(@f)raw}")
+        fi
+
+        if (( ${#matches[@]} > 0 )); then
+            found=$((found + 1))
+            plural=""
+            (( ${#matches[@]} > 1 )) && plural="s"
+            echo "${GREEN}[OK]${RESET} ${label} ${DIM}(${#matches[@]} installation${plural})${RESET}"
+
+            for bin_path in "${matches[@]}"; do
+                # "< /dev/null" prevents interactive setup prompts; timeout prevents daemon/network hangs
+                if [[ "$cmd" == "perl" ]]; then
+                    ver=$(run_with_timeout "$bin_path" "${(z)verflag}" < /dev/null 2>&1 | grep -m1 -i "This is perl")
+                elif [[ "$cmd" == "cpan" ]]; then
+                    ver=$(run_with_timeout "$bin_path" "${(z)verflag}" < /dev/null 2>&1 | grep -m1 -i "cpan script version")
+                else
+                    ver=$(run_with_timeout "$bin_path" "${(z)verflag}" < /dev/null 2>&1 | head -n1)
+                fi
+                echo "       ${DIM}${bin_path}${RESET}"
+                echo "       ${DIM}${ver:-${YELLOW}(version check timed out or silent)${DIM}}${RESET}"
+            done
+        else
+            missing=$((missing + 1))
+            echo "${RED}[--]${RESET} ${label} ${DIM}not found${RESET}"
+        fi
+    done
+
+    echo "${DIM}------------------------------------------------------------${RESET}"
+    echo "${BOLD}${found} found, ${missing} missing${RESET}"
+    echo
+}
+
+# ------------------------------------------------------------------
+# 1. Language Toolchains & Compilers
+# ------------------------------------------------------------------
 TOOLS=(
     "C (gcc)|gcc|--version"
     "C (clang)|clang|--version"
@@ -40,86 +135,165 @@ TOOLS=(
     "Julia|julia|--version"
 )
 
-echo "${DIM}------------------------------------------------------------${RESET}"
 echo "${BOLD}Installed language toolchains (all PATH matches)${RESET}"
 echo "${DIM}------------------------------------------------------------${RESET}"
+check_tool_array "${TOOLS[@]}"
 
-found=0
-missing=0
+# ------------------------------------------------------------------
+# 2. Package & Build Managers
+# ------------------------------------------------------------------
+PKG_TOOLS=(
+    # JavaScript / TypeScript / Deno / Bun
+    "npm (Node)|npm|--version"
+    "pnpm (Node)|pnpm|--version"
+    "yarn (Node)|yarn|--version"
+    "npx (Node)|npx|--version"
+    "Bower (JS)|bower|--version"
+    # Python
+    "pip (Python)|pip|--version"
+    "pip3 (Python)|pip3|--version"
+    "uv (Python)|uv|--version"
+    "Poetry (Python)|poetry|--version"
+    "Conda (Python)|conda|--version"
+    "Pipenv (Python)|pipenv|--version"
+    "PDM (Python)|pdm|--version"
+    "Rye (Python)|rye|--version"
+    "Flit (Python)|flit|--version"
+    "Hatch (Python)|hatch|--version"
+    # Java / Kotlin / Scala / Groovy
+    "Maven (Java)|mvn|-version"
+    "Gradle (Java)|gradle|--version"
+    "Ant (Java)|ant|-version"
+    "sbt (Scala)|sbt|--script-version"
+    "Mill (Scala)|mill|--version"
+    # Ruby
+    "RubyGems (Ruby)|gem|--version"
+    "Bundler (Ruby)|bundle|--version"
+    # PHP
+    "Composer (PHP)|composer|--version"
+    "PEAR (PHP)|pear|-V"
+    "PECL (PHP)|pecl|-V"
+    # Perl
+    "CPAN (Perl)|cpan|-v"
+    "cpanm (Perl)|cpanm|--version"
+    "Carton (Perl)|carton|--version"
+    # Lua
+    "LuaRocks (Lua)|luarocks|--version"
+    # C / C++
+    "CMake (C/C++)|cmake|--version"
+    "Make (C/C++)|make|--version"
+    "Ninja (C/C++)|ninja|--version"
+    "Conan (C/C++)|conan|--version"
+    "vcpkg (C/C++)|vcpkg|version"
+    "Meson (C/C++)|meson|--version"
+    "Automake (C/C++)|automake|--version"
+    # Go
+    "Go Modules (Go)|go|version"
+    # Rust
+    "Cargo (Rust)|cargo|--version"
+    # Swift / C# / Haskell / Elixir / Erlang / Julia / R
+    "CocoaPods (Swift/Obj-C)|pod|--version"
+    "Carthage (Swift)|carthage|version"
+    "Swift PM (Swift)|swift|package --version"
+    "NuGet (C#/.NET)|nuget|help"
+    "MSBuild (C#/.NET)|msbuild|-version"
+    "Cabal (Haskell)|cabal|--version"
+    "Stack (Haskell)|stack|--version"
+    "Mix (Elixir)|mix|--version"
+    "Rebar3 (Erlang)|rebar3|--version"
+    "Hex (Elixir/Erlang)|mix|hex --version"
+    "Julia Pkg (Julia)|julia|-e 'using Pkg; println(Pkg.VERSION)'"
+    "Rscript (R)|Rscript|--version"
+    # System / Multi-language
+    "Homebrew|brew|--version"
+    "Nix|nix|--version"
+    "Devbox|devbox|version"
+)
 
-for entry in "${TOOLS[@]}"; do
-    IFS='|' read -r label cmd verflag <<< "$entry"
-
-    raw=$(whence -ap "$cmd" 2>/dev/null)
-
-    if [[ -z "$raw" ]]; then
-        matches=()
-    else
-        matches=("${(@f)raw}")
-    fi
-
-    if (( ${#matches[@]} > 0 )); then
-        found=$((found + 1))
-        plural=""
-        (( ${#matches[@]} > 1 )) && plural="s"
-        echo "${GREEN}[OK]${RESET} ${label} ${DIM}(${#matches[@]} installation${plural})${RESET}"
-
-        for bin_path in "${matches[@]}"; do
-            # Perl prints its version on the "This is perl" line, not always line 1
-            if [[ "$cmd" == "perl" ]]; then
-                ver=$("$bin_path" "$verflag" 2>&1 | grep -m1 -i "This is perl")
-            else
-                ver=$("$bin_path" "$verflag" 2>&1 | head -n1)
-            fi
-            echo "       ${DIM}${bin_path}${RESET}"
-            echo "       ${DIM}${ver}${RESET}"
-        done
-    else
-        missing=$((missing + 1))
-        echo "${RED}[--]${RESET} ${label} ${DIM}not found${RESET}"
-    fi
-done
-
+echo "${BOLD}Installed package & build managers${RESET}"
 echo "${DIM}------------------------------------------------------------${RESET}"
-echo "${BOLD}${found} found, ${missing} missing${RESET}"
-echo
+check_tool_array "${PKG_TOOLS[@]}"
 
 # ------------------------------------------------------------------
-# Version managers — these often shim a single binary on PATH, so
-# the section above only sees the "active" version. Ask each manager
-# directly for its full list. Each check is independent: this only
-# fires if that manager's own binary/config is genuinely present.
+# 3. Version Managers
 # ------------------------------------------------------------------
-
 echo "${BOLD}Version managers${RESET}"
 echo "${DIM}------------------------------------------------------------${RESET}"
 
 any_manager=false
 
-if command -v pyenv >/dev/null 2>&1; then
+# Multi-Language Managers
+if command -v mise >/dev/null 2>&1 || command -v rtx >/dev/null 2>&1; then
     any_manager=true
-    echo "${YELLOW}pyenv${RESET} (Python) — versions:"
-    pyenv versions 2>/dev/null | sed 's/^/       /'
+    cmd=$(command -v mise || command -v rtx)
+    echo "${YELLOW}$(basename "$cmd")${RESET} (multi-language) — installed tool versions:"
+    "$cmd" list 2>/dev/null | sed 's/^/        /'
     echo
 fi
 
+if command -v asdf >/dev/null 2>&1; then
+    any_manager=true
+    echo "${YELLOW}asdf${RESET} (multi-language) — installed plugins/versions:"
+    asdf list 2>/dev/null | sed 's/^/        /'
+    echo
+fi
+
+if command -v proto >/dev/null 2>&1; then
+    any_manager=true
+    echo "${YELLOW}proto${RESET} (multi-language) — versions:"
+    proto list-remote --help >/dev/null 2>&1 && proto status 2>/dev/null | sed 's/^/        /'
+    echo
+fi
+
+# Python Version Managers
+if command -v pyenv >/dev/null 2>&1; then
+    any_manager=true
+    echo "${YELLOW}pyenv${RESET} (Python) — versions:"
+    pyenv versions 2>/dev/null | sed 's/^/        /'
+    echo
+fi
+
+if command -v conda >/dev/null 2>&1; then
+    any_manager=true
+    echo "${YELLOW}conda${RESET} (Python/General) — environments:"
+    conda info --envs 2>/dev/null | grep -v '^#' | sed 's/^/        /'
+    echo
+fi
+
+# Node.js / JS Version Managers
 if command -v nvm >/dev/null 2>&1 || [[ -s "${NVM_DIR:-$HOME/.nvm}/nvm.sh" ]]; then
     any_manager=true
     echo "${YELLOW}nvm${RESET} (Node.js) — versions:"
     if [[ -s "${NVM_DIR:-$HOME/.nvm}/nvm.sh" ]]; then
         source "${NVM_DIR:-$HOME/.nvm}/nvm.sh" >/dev/null 2>&1
     fi
-    nvm ls 2>/dev/null | sed 's/^/       /'
+    nvm ls 2>/dev/null | sed 's/^/        /'
     echo
 fi
 
+if command -v fnm >/dev/null 2>&1; then
+    any_manager=true
+    echo "${YELLOW}fnm${RESET} (Node.js) — versions:"
+    fnm list 2>/dev/null | sed 's/^/        /'
+    echo
+fi
+
+if command -v volta >/dev/null 2>&1; then
+    any_manager=true
+    echo "${YELLOW}volta${RESET} (JS/Node toolchain) — installed tools:"
+    volta list 2>/dev/null | sed 's/^/        /'
+    echo
+fi
+
+# Rust Version Manager
 if command -v rustup >/dev/null 2>&1; then
     any_manager=true
     echo "${YELLOW}rustup${RESET} (Rust) — toolchains:"
-    rustup toolchain list 2>/dev/null | sed 's/^/       /'
+    rustup toolchain list 2>/dev/null | sed 's/^/        /'
     echo
 fi
 
+# Java / JVM Version Managers
 if command -v sdk >/dev/null 2>&1 || [[ -s "$HOME/.sdkman/bin/sdkman-init.sh" ]]; then
     any_manager=true
     echo "${YELLOW}sdkman${RESET} (Java/Kotlin/Scala/Groovy) — installed candidates:"
@@ -134,22 +308,139 @@ if command -v sdk >/dev/null 2>&1 || [[ -s "$HOME/.sdkman/bin/sdkman-init.sh" ]]
     echo
 fi
 
-if command -v rbenv >/dev/null 2>&1; then
+if command -v jenv >/dev/null 2>&1; then
     any_manager=true
-    echo "${YELLOW}rbenv${RESET} (Ruby) — versions:"
-    rbenv versions 2>/dev/null | sed 's/^/       /'
+    echo "${YELLOW}jenv${RESET} (Java) — versions:"
+    jenv versions 2>/dev/null | sed 's/^/        /'
     echo
 fi
 
-if command -v asdf >/dev/null 2>&1; then
+# Ruby Version Managers
+if command -v rbenv >/dev/null 2>&1; then
     any_manager=true
-    echo "${YELLOW}asdf${RESET} (multi-language) — installed plugins/versions:"
-    asdf list 2>/dev/null | sed 's/^/       /'
+    echo "${YELLOW}rbenv${RESET} (Ruby) — versions:"
+    rbenv versions 2>/dev/null | sed 's/^/        /'
+    echo
+fi
+
+if command -v rvm >/dev/null 2>&1; then
+    any_manager=true
+    echo "${YELLOW}rvm${RESET} (Ruby) — list:"
+    rvm list 2>/dev/null | sed 's/^/        /'
+    echo
+fi
+
+if command -v chruby >/dev/null 2>&1; then
+    any_manager=true
+    echo "${YELLOW}chruby${RESET} (Ruby) — versions:"
+    chruby 2>/dev/null | sed 's/^/        /'
+    echo
+fi
+
+# Go Version Managers
+if command -v gvm >/dev/null 2>&1 || [[ -s "$HOME/.gvm/scripts/gvm" ]]; then
+    any_manager=true
+    [[ -s "$HOME/.gvm/scripts/gvm" ]] && source "$HOME/.gvm/scripts/gvm" >/dev/null 2>&1
+    echo "${YELLOW}gvm${RESET} (Go) — versions:"
+    gvm list 2>/dev/null | sed 's/^/        /'
+    echo
+fi
+
+if command -v goenv >/dev/null 2>&1; then
+    any_manager=true
+    echo "${YELLOW}goenv${RESET} (Go) — versions:"
+    goenv versions 2>/dev/null | sed 's/^/        /'
+    echo
+fi
+
+# PHP Version Managers
+if command -v phpenv >/dev/null 2>&1; then
+    any_manager=true
+    echo "${YELLOW}phpenv${RESET} (PHP) — versions:"
+    phpenv versions 2>/dev/null | sed 's/^/        /'
+    echo
+fi
+
+if command -v phpbrew >/dev/null 2>&1; then
+    any_manager=true
+    echo "${YELLOW}phpbrew${RESET} (PHP) — list:"
+    phpbrew list 2>/dev/null | sed 's/^/        /'
+    echo
+fi
+
+# Swift / Perl / Lua / Haskell / Elixir / Erlang / Julia / R / Zig Managers
+if command -v swiftenv >/dev/null 2>&1; then
+    any_manager=true
+    echo "${YELLOW}swiftenv${RESET} (Swift) — versions:"
+    swiftenv versions 2>/dev/null | sed 's/^/        /'
+    echo
+fi
+
+if command -v plenv >/dev/null 2>&1; then
+    any_manager=true
+    echo "${YELLOW}plenv${RESET} (Perl) — versions:"
+    plenv versions 2>/dev/null | sed 's/^/        /'
+    echo
+fi
+
+if command -v perlbrew >/dev/null 2>&1; then
+    any_manager=true
+    echo "${YELLOW}perlbrew${RESET} (Perl) — list:"
+    perlbrew list 2>/dev/null | sed 's/^/        /'
+    echo
+fi
+
+if command -v luaenv >/dev/null 2>&1; then
+    any_manager=true
+    echo "${YELLOW}luaenv${RESET} (Lua) — versions:"
+    luaenv versions 2>/dev/null | sed 's/^/        /'
+    echo
+fi
+
+if command -v ghcup >/dev/null 2>&1; then
+    any_manager=true
+    echo "${YELLOW}ghcup${RESET} (Haskell) — installed tools:"
+    ghcup list -c installed 2>/dev/null | sed 's/^/        /'
+    echo
+fi
+
+if command -v kiex >/dev/null 2>&1; then
+    any_manager=true
+    echo "${YELLOW}kiex${RESET} (Elixir) — list:"
+    kiex list 2>/dev/null | sed 's/^/        /'
+    echo
+fi
+
+if command -v kerl >/dev/null 2>&1; then
+    any_manager=true
+    echo "${YELLOW}kerl${RESET} (Erlang) — list installations:"
+    kerl list installations 2>/dev/null | sed 's/^/        /'
+    echo
+fi
+
+if command -v juliaup >/dev/null 2>&1; then
+    any_manager=true
+    echo "${YELLOW}juliaup${RESET} (Julia) — status:"
+    juliaup status 2>/dev/null | grep -v '^$' | sed 's/^/        /'
+    echo
+fi
+
+if command -v rig >/dev/null 2>&1; then
+    any_manager=true
+    echo "${YELLOW}rig${RESET} (R) — installed versions:"
+    rig list 2>/dev/null | sed 's/^/        /'
+    echo
+fi
+
+if command -v zvm >/dev/null 2>&1; then
+    any_manager=true
+    echo "${YELLOW}zvm${RESET} (Zig) — list:"
+    zvm ls 2>/dev/null | sed 's/^/        /'
     echo
 fi
 
 if ! $any_manager; then
-    echo "${DIM}(none detected: pyenv, nvm, rustup, sdkman, rbenv, asdf)${RESET}"
+    echo "${DIM}(none detected)${RESET}"
 fi
 
 echo "${DIM}------------------------------------------------------------${RESET}"
