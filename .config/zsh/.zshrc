@@ -19,6 +19,7 @@ alias lt='eza --icons=auto --tree'                                     # list fo
 # # Always mkdir a path (this doesn't inhibit functionality to make a single dir)
 alias mkdir='mkdir -p'
 
+
 #  This is your file 
 # Add your configurations here
 export EDITOR=nvim
