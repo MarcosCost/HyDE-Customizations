@@ -6,6 +6,12 @@ keyconfDir="$confDir/hypr"
 kb_hint_conf=("$keyconfDir/hyprland.conf" "$keyconfDir/keybindings.conf" "$keyconfDir/userprefs.conf")
 kb_hint_conf+=("${ROFI_KEYBIND_HINT_CONFIG[@]}")
 kb_cache="$XDG_RUNTIME_DIR/hyde/keybinds_hint.rofi"
+
+if [[ $1 == "--reload" ]]; then
+    "${LIB_DIR}/hyde/keybinds/hint-hyprland.py" --format rofi >"$kb_cache" && echo "Keybind cache updated"
+    exit 0
+fi
+
 [ -f "$kb_cache" ] && {
     trap '${LIB_DIR}/hyde/keybinds/hint-hyprland.py --format rofi > "$kb_cache" && echo "Keybind cache updated" ' EXIT
 }
@@ -55,11 +61,12 @@ selected=$(echo -e "$output" | rofi -dmenu \
     -theme-str "$r_override" \
     -theme-str "$icon_override" | sed 's/.*\s*//')
 if [ -z "$selected" ]; then exit 0; fi
-dispatch=$(awk -F ':::' '{print $2}' <<< "$selected" | xargs)
-arg=$(awk -F ':::' '{print $3}' <<< "$selected" | xargs)
-repeat=$(awk -F ':::' '{print $4}' <<< "$selected" | xargs)
+read_field() { awk -F ':::' -v f="$1" '{gsub(/^[[:space:]]+|[[:space:]]+$/, "", $f); print $f}' <<<"$selected"; }
+dispatch=$(read_field 2)
+arg=$(read_field 3)
+repeat=$(read_field 4)
 RUN() {
-    case "$(eval "hyprctl dispatch '$dispatch' '$arg'")" in *"Not enough arguments"*) exec $0 ;; esac
+    case "$(hyprctl dispatch "$dispatch" "$arg")" in *"Not enough arguments"*) exec "$0" ;; esac
 }
 if [ -n "$dispatch" ] && [ "$(echo "$dispatch" | wc -l)" -eq 1 ]; then
     if [ "$repeat" = repeat ]; then
